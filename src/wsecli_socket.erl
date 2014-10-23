@@ -2,7 +2,7 @@
 -module(wsecli_socket).
 -include("wsecli.hrl").
 
--export([open/4]).
+-export([open/5]).
 -export([send/2]).
 -export([close/1]).
 
@@ -18,7 +18,8 @@
 %%========================================
 %% Constants
 %%========================================
--define(DEFAULT_SOCKET_OPTIONS, [binary, {reuseaddr, true}, {packet, raw}]).
+-define(DEFAULT_SOCKET_OPTIONS(Timeout), [{reuseaddr, true}, {packet, raw},
+                                         binary, {send_timeout, Timeout}]).
 
 %%========================================
 %% Client API
@@ -27,14 +28,17 @@
   Host    :: string(),
   Port    :: inet:port_number(),
   Type    :: socket_type(),
+  Timeout :: timeout(),
   Client  :: pid()
   ) ->
   {ok, socket()} |
   {error, term()}.
-open(Host, Port, plain, Client) ->
-  wsecli_socket_plain:start_link(Host, Port, Client, ?DEFAULT_SOCKET_OPTIONS);
-open(Host, Port, ssl, Client) ->
-  wsecli_socket_ssl:start_link(Host, Port, Client, ?DEFAULT_SOCKET_OPTIONS).
+open(Host, Port, plain, Timeout, Client) ->
+  wsecli_socket_plain:start_link(Host, Port, Client,
+                                 ?DEFAULT_SOCKET_OPTIONS(Timeout), Timeout);
+open(Host, Port, ssl, Timeout, Client) ->
+  wsecli_socket_ssl:start_link(Host, Port, Client,
+                              ?DEFAULT_SOCKET_OPTIONS(Timeout), Timeout).
 
 -spec send(
   Data   :: iolist(),

@@ -109,11 +109,12 @@ start(URI, Options) ->
   Port     :: inet:port_number(),
   Resource :: string(),
   Options  :: list({atom(), any()})
-) -> {ok, pid()}.
+) -> {ok, pid()} | {error, {shutdown, any()}} | {error, any()}.
 start(Host, Port, Path, Options) ->
   UseSSL        = proplists:get_value(ssl, Options, false),
-  GenOptions    = [{timeout, 5000}],
-  ClientOptions = {Host, Port, Path, UseSSL},
+  Timeout       = proplists:get_value(timeout, Options, 5000),
+  GenOptions    = [{timeout, Timeout}],
+  ClientOptions = {Host, Port, Path, UseSSL, Timeout},
   case proplists:get_value(register, Options, false) of
       false ->
         gen_fsm:start_link(?MODULE, ClientOptions, GenOptions);
@@ -262,16 +263,20 @@ on_close(Client, Callback) ->
     Resource :: string(),
     SSL      :: boolean()
   }
-  ) -> {ok, connecting, #data{}}.
-init({Host, Port, Resource, SSL}) ->
+  ) -> {ok, connecting, #data{}} | {stop, {shutdown, any()}}.
+init({Host, Port, Resource, SSL, Timeout}) ->
   SocketType = case SSL of true -> ssl; false -> plain end,
-  {ok, Socket}    = wsecli_socket:open(Host, Port, SocketType, self()),
-  {ok, Handshake} = wsock_handshake:open(Resource, Host, Port),
-  Request         = wsock_http:encode(Handshake#handshake.message),
+  case wsecli_socket:open(Host, Port, SocketType, Timeout, self()) of
+    {ok, Socket} ->
+      {ok, Handshake} = wsock_handshake:open(Resource, Host, Port),
+      Request         = wsock_http:encode(Handshake#handshake.message),
 
-  wsecli_socket:send(Request, Socket),
+      wsecli_socket:send(Request, Socket),
 
-  {ok, connecting, #data{ socket = Socket, handshake = Handshake }}.
+      {ok, connecting, #data{ socket = Socket, handshake = Handshake }};
+    {error, Error} ->
+      {stop, {shutdown, Error}}
+  end.
 
 
 %% @hidden
@@ -366,8 +371,9 @@ handle_info({socket, {data, Data}}, connecting, StateData) ->
     {ok, _Handshake} ->
       spawn(StateData#data.cb#callbacks.on_open),
       {next_state, open, StateData};
-    {error, _Error} ->
-      {stop, failed_handshake, StateData}
+    {error, Error} ->
+      (StateData#data.cb#callbacks.on_error)(Error),
+      {stop, {shutdown, failed_handshake}, StateData}
   end;
 handle_info({socket, {data, Data}}, open, StateData) ->
   {Messages, State} = case StateData#data.fragmented_message of
@@ -389,7 +395,10 @@ handle_info({socket, {data, Data}}, closing, StateData) ->
       {next_state, closing, StateData}
   end;
 handle_info({socket, close}, _StateName, StateData) ->
-  {stop, normal, StateData}.
+  {stop, normal, StateData};
+handle_info({socket, {error, Error}}, StateName, StateData) ->
+  (StateData#data.cb#callbacks.on_error)(Error),
+  {next_state, StateName, StateData}.
 
 %% @hidden
 -spec terminate(
