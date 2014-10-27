@@ -2,8 +2,8 @@
 -module(wsecli_socket_ssl).
 -include("wsecli.hrl").
 
--export([start_link/4]).
--export([init/4]).
+-export([start_link/5]).
+-export([init/5]).
 -export([loop/1]).
 
 
@@ -22,22 +22,28 @@
   Host    :: string(),
   Port    :: inet:port_number(),
   Client  :: pid(),
-  Options :: list(ssl:connect_option())
+  Options :: list(ssl:connect_option()),
+  Timeout :: timeout()
 ) -> {ok, socket()}.
-start_link(Host, Port, Client, Options) ->
-  proc_lib:start_link(?MODULE, init, [Host, Port, Client, Options]).
+start_link(Host, Port, Client, Options, Timeout) ->
+  proc_lib:start_link(?MODULE, init, [Host, Port, Client, Options, Timeout]).
 
 -spec init(
   Host    :: string(),
   Port    :: inet:port_number(),
   Client  :: pid(),
-  Options :: list(ssl:connect_option())
+  Options :: list(ssl:connect_option()),
+  Timeout :: timeout()
   ) -> ok.
-init(Host, Port, Client, Options) ->
-  {ok, Socket} = ssl:connect(Host, Port, Options),
-  State        = #state{ client = Client, socket = Socket },
-  proc_lib:init_ack({ok, self()}),
-  loop(State).
+init(Host, Port, Client, Options, Timeout) ->
+  case ssl:connect(Host, Port, Options, Timeout) of
+    {ok, Socket} ->
+      State        = #state{ client = Client, socket = Socket },
+      proc_lib:init_ack({ok, self()}),
+      loop(State);
+    {error, _} = Error ->
+      proc_lib:init_ack(Error)
+  end.
 
 %%========================================
 %% Internal
@@ -45,7 +51,12 @@ init(Host, Port, Client, Options) ->
 loop(State) ->
   receive
     {socket, send, Data}   ->
-      ssl:send(State#state.socket, Data),
+      case ssl:send(State#state.socket, Data) of
+        ok ->
+          ok;
+        {error, _} = Error ->
+          wsecli_socket:notify_client(Error, State#state.client)
+      end,
       loop(State);
     {socket, close}        ->
       ssl:close(State#state.socket);
