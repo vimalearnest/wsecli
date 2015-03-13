@@ -114,7 +114,7 @@ handshake(Data, State) ->
                  "Upgrade: WebSocket\r\n",
                  "Connection: Upgrade\r\n",
                  "Sec-WebSocket-Accept: ",
-                 base64:encode_to_string(crypto:sha(<<BinaryClientKey/binary, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11">>)),
+                 base64:encode_to_string(crypto:hash(sha, <<BinaryClientKey/binary, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11">>)),
                  "\r\n\r\n"
                 ],
     gen_tcp:send(State#state.socket, HandShake).
