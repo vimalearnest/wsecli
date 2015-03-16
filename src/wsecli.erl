@@ -33,11 +33,14 @@
     on_close   :: on_close_callback()
   }).
 
+-record(http_fragment, {data :: binary()}).
+
 -record(data, {
     socket                         :: inet:socket(),
     handshake                      :: undefined | #handshake{},
     cb = default_callbacks()       :: callbacks(),
-    fragmented_message = undefined :: undefined | #message{}
+    fragmented_message = undefined :: undefined | #message{},
+    http_fragment = undefined      :: undefined | http_fragment()
   }).
 
 %%========================================
@@ -52,6 +55,7 @@
 -type data_callback()       :: fun((text, string()) -> any()) | fun((binary, binary()) -> any()).
 -type on_message_callback() :: data_callback().
 -type on_close_callback()   :: fun((undefined) -> any()).
+-type http_fragment()       :: #http_fragment{}.
 
 %%========================================
 %% Constants
@@ -363,9 +367,10 @@ handle_sync_event(stop, _From, open, StateData) ->
   StateName :: connecting,
   StateData :: data()
   ) -> {next_state, atom(), #data{}}.
-handle_info({socket, {data, Data}}, connecting, StateData = #data{fragmented_message = undefined}) ->
+handle_info({socket, {data, Data}}, connecting, StateData = #data{http_fragment = undefined}) ->
   do_wsock_httpdecode(Data, StateData);
-handle_info({socket, {data, DataIn}}, connecting, StateData = #data{fragmented_message = Previous}) ->
+handle_info({socket, {data, DataIn}}, connecting,
+            StateData = #data{http_fragment = #http_fragment{data = Previous}}) ->
   Data = <<Previous/binary, DataIn/binary>>,
   do_wsock_httpdecode(Data, StateData);
 handle_info({socket, {data, Data}}, open, StateData) ->
@@ -394,9 +399,11 @@ do_wsock_httpdecode(Data, StateData) ->
     case wsock_http:decode(Data, response) of
         {ok, Response} ->
             Resp = wsock_handshake:handle_response(Response, StateData#data.handshake),
-            do_handle_response(Resp, StateData);
-        fragmented_http_message ->
-            {next_state, connecting, StateData#data{fragmented_message = Data}}
+            do_handle_response(Resp, StateData#data{http_fragment = undefined});
+        {error, fragmented_http_message} ->
+            {next_state, connecting, StateData#data{http_fragment = Data}};
+        {error, malformed_request} ->
+            erlang:exit(malformed_request)
     end.
 
 do_handle_response({ok, _Handshake}, StateData) ->
