@@ -363,15 +363,11 @@ handle_sync_event(stop, _From, open, StateData) ->
   StateName :: connecting,
   StateData :: data()
   ) -> {next_state, atom(), #data{}}.
-handle_info({socket, {data, Data}}, connecting, StateData) ->
-  {ok, Response} = wsock_http:decode(Data, response),
-  case wsock_handshake:handle_response(Response, StateData#data.handshake) of
-    {ok, _Handshake} ->
-      spawn(StateData#data.cb#callbacks.on_open),
-      {next_state, open, StateData};
-    {error, _Error} ->
-      {stop, failed_handshake, StateData}
-  end;
+handle_info({socket, {data, Data}}, connecting, StateData = #data{fragmented_message = undefined}) ->
+  do_wsock_httpdecode(Data, StateData);
+handle_info({socket, {data, DataIn}}, connecting, StateData = #data{fragmented_message = Previous}) ->
+  Data = <<Previous/binary, DataIn/binary>>,
+  do_wsock_httpdecode(Data, StateData);
 handle_info({socket, {data, Data}}, open, StateData) ->
   {Messages, State} = case StateData#data.fragmented_message of
     undefined ->
@@ -393,6 +389,21 @@ handle_info({socket, {data, Data}}, closing, StateData) ->
   end;
 handle_info({socket, close}, _StateName, StateData) ->
   {stop, normal, StateData}.
+
+do_wsock_httpdecode(Data, StateData) ->
+    case wsock_http:decode(Data, response) of
+        {ok, Response} ->
+            Resp = wsock_handshake:handle_response(Response, StateData#data.handshake),
+            do_handle_response(Resp, StateData);
+        fragmented_http_message ->
+            {next_state, connecting, StateData#data{fragmented_message = Data}}
+    end.
+
+do_handle_response({ok, _Handshake}, StateData) ->
+    spawn(StateData#data.cb#callbacks.on_open),
+    {next_state, open, StateData#data{fragmented_message = undefined}};
+do_handle_response({error, _Error}, StateData) ->
+    {stop, failed_handshake, StateData}.
 
 %% @hidden
 -spec terminate(
