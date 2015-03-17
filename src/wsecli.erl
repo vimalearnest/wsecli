@@ -401,7 +401,7 @@ do_wsock_httpdecode(Data, StateData) ->
             Resp = wsock_handshake:handle_response(Response, StateData#data.handshake),
             do_handle_response(Resp, StateData#data{http_fragment = undefined});
         {error, fragmented_http_message} ->
-            {next_state, connecting, StateData#data{http_fragment = Data}};
+            {next_state, connecting, StateData#data{http_fragment = http_fragment(Data)}};
         {error, malformed_request} ->
             erlang:exit(malformed_request)
     end.
@@ -454,3 +454,6 @@ default_callbacks() ->
                on_error = fun(_Reason)-> undefined end,
                on_message = fun(_Type, _Message) -> undefined end,
                on_close = fun(_Reason) -> undefined end}.
+
+-spec http_fragment(binary()) -> http_fragment().
+http_fragment(Data) -> #http_fragment{data = Data}.
