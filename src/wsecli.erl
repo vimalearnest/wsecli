@@ -30,6 +30,7 @@
     on_open    :: on_open_callback(),
     on_error   :: on_error_callback(),
     on_message :: on_message_callback(),
+    on_ping :: on_ping_callback(),
     on_close   :: on_close_callback()
   }).
 
@@ -54,6 +55,7 @@
 -type on_error_callback()   :: fun((string()) -> any()).
 -type data_callback()       :: fun((text, string()) -> any()) | fun((binary, binary()) -> any()).
 -type on_message_callback() :: data_callback().
+-type on_ping_callback()    :: fun(() -> any()).
 -type on_close_callback()   :: fun((undefined) -> any()).
 -type http_fragment()       :: #http_fragment{}.
 
@@ -445,7 +447,11 @@ process_messages([Message | Messages], StateData) ->
       process_messages(Messages, StateData);
     fragmented ->
       NewStateData = StateData#data{fragmented_message = Message},
-      process_messages(Messages, NewStateData)
+      process_messages(Messages, NewStateData);
+    ping ->
+      Self = self(),
+      spawn(fun() -> (StateData#data.cb#callbacks.on_ping)(Self) end),
+      process_messages(Messages, StateData)
   end.
 
 -spec default_callbacks() -> callbacks().
@@ -453,6 +459,7 @@ default_callbacks() ->
     #callbacks{on_open = fun() -> undefined end,
                on_error = fun(_Reason)-> undefined end,
                on_message = fun(_Type, _Message) -> undefined end,
+               on_ping    = fun(Server) -> send(Server, "", pong) end,
                on_close = fun(_Reason) -> undefined end}.
 
 -spec http_fragment(binary()) -> http_fragment().
