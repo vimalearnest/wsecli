@@ -305,7 +305,7 @@ connecting({send, _Data}, StateData) ->
   StateData :: data()
   ) -> term().
 open({on_open, Callback}, StateData) ->
-  spawn(Callback),
+  execute_callback(Callback),
   {next_state, open, StateData};
 open({send, Data, Type}, StateData) ->
   Message = wsock_message:encode(Data, [mask, Type]),
@@ -407,7 +407,7 @@ do_wsock_httpdecode(Data, StateData) ->
     end.
 
 do_handle_response({ok, _Handshake}, StateData) ->
-    spawn(StateData#data.cb#callbacks.on_open),
+    execute_callback(StateData#data.cb#callbacks.on_open),
     {next_state, open, StateData#data{fragmented_message = undefined}};
 do_handle_response({error, _Error}, StateData) ->
     {stop, failed_handshake, StateData}.
@@ -420,7 +420,7 @@ do_handle_response({error, _Error}, StateData) ->
   ) -> pid().
 terminate(_Reason, _StateName, StateData) ->
   wsecli_socket:close(StateData#data.socket),
-  spawn(fun() -> (StateData#data.cb#callbacks.on_close)(undefined) end).
+  execute_callback(fun() -> (StateData#data.cb#callbacks.on_close)(undefined) end).
 
 %% @hidden
 code_change(_OldVsn, StateName, StateData, _Extra) ->
@@ -438,10 +438,10 @@ process_messages([], StateData) ->
 process_messages([Message | Messages], StateData) ->
   case Message#message.type of
     text ->
-      spawn(fun() -> (StateData#data.cb#callbacks.on_message)(text, Message#message.payload) end),
+      execute_callback(fun() -> (StateData#data.cb#callbacks.on_message)(text, Message#message.payload) end),
       process_messages(Messages, StateData);
     binary ->
-      spawn(fun() -> (StateData#data.cb#callbacks.on_message)(binary, Message#message.payload) end),
+      execute_callback(fun() -> (StateData#data.cb#callbacks.on_message)(binary, Message#message.payload) end),
       process_messages(Messages, StateData);
     fragmented ->
       NewStateData = StateData#data{fragmented_message = Message},
@@ -457,3 +457,11 @@ default_callbacks() ->
 
 -spec http_fragment(binary()) -> http_fragment().
 http_fragment(Data) -> #http_fragment{data = Data}.
+
+execute_callback(F) ->
+    try
+        F()
+    catch Class:Error ->
+        error_logger:error_msg("application=wsecli, issue=hook_failed, reason=~1000p:~1000p", 
+                               [Class, Error])
+    end.
