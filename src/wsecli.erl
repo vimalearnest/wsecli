@@ -21,10 +21,19 @@
 
 -include_lib("wsock/include/wsock.hrl").
 
--export([start/2, start/4, stop/0, stop/1, send/1, send/2, send/3]).
--export([on_open/1, on_open/2, on_error/1, on_error/2, on_message/1, on_message/2, on_close/1, on_close/2]).
+-export([start/2, start/4,
+         stop/0, stop/1,
+         send/1, send/2, send/3]).
+-export([on_open/1, on_open/2,
+         on_error/1, on_error/2,
+         on_message/1, on_message/2,
+         on_close/1, on_close/2]).
 -export([init/1, connecting/2, open/2, closing/2]).
--export([handle_event/3, handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
+-export([handle_event/3,
+         handle_sync_event/4,
+         handle_info/3,
+         terminate/3,
+         code_change/4]).
 
 -record(callbacks, {
     on_open    :: on_open_callback(),
@@ -272,7 +281,7 @@ on_close(Client, Callback) ->
   ) -> {ok, connecting, #data{}}.
 init({Host, Port, Resource, SSL}) ->
   SocketType = case SSL of true -> ssl; false -> plain end,
-  {ok, Socket}    = wsecli_socket:open(Host, Port, SocketType, self()),
+    {ok, Socket}    = wsecli_socket:open(Host, Port, SocketType, self()),
   {ok, Handshake} = wsock_handshake:open(Resource, Host, Port),
   Request         = wsock_http:encode(Handshake#handshake.message),
 
@@ -380,8 +389,22 @@ handle_info({socket, {data, Data}}, open, StateData) ->
     Message ->
       {wsock_message:decode(Data, Message, []), StateData#data{fragmented_message = undefined}}
   end,
-  NewStateData = process_messages(Messages, State),
-  {next_state, open, NewStateData};
+  % check if we got a close message
+  {CloseMsgs, Others} =
+        lists:splitwith(fun(M) -> M#message.type == close end,
+                        Messages),
+  case CloseMsgs of
+      [] ->
+          NewStateData = process_messages(Others, State),
+          {next_state, open, NewStateData};
+      _ ->
+          NewStateData = process_messages(Others, State),
+          LastClose = lists:last(CloseMsgs),
+          CloseResponse = wsock_message:encode(LastClose#message.payload,
+                                               [mask, close]),
+          wsecli_socket:send(CloseResponse, StateData#data.socket),
+          {next_state, closing, NewStateData}
+  end;
 handle_info({socket, {data, Data}}, closing, StateData) ->
   [Message] = wsock_message:decode(Data, []),
   case Message#message.type of
@@ -437,11 +460,20 @@ process_messages([], StateData) ->
   StateData;
 process_messages([Message | Messages], StateData) ->
   case Message#message.type of
+    ping ->
+      Pong = wsock_message:encode(Message#message.payload, [mask, pong]),
+      wsecli_socket:send(Pong, StateData#data.socket),
+      process_messages(Messages, StateData);
     text ->
-      execute_callback(fun() -> (StateData#data.cb#callbacks.on_message)(text, Message#message.payload) end),
+      execute_callback(
+        fun() ->
+          (StateData#data.cb#callbacks.on_message)(text, Message#message.payload) end
+      ),
       process_messages(Messages, StateData);
     binary ->
-      execute_callback(fun() -> (StateData#data.cb#callbacks.on_message)(binary, Message#message.payload) end),
+      execute_callback(fun() ->
+          (StateData#data.cb#callbacks.on_message)(binary, Message#message.payload) end
+      ),
       process_messages(Messages, StateData);
     fragmented ->
       NewStateData = StateData#data{fragmented_message = Message},
@@ -462,6 +494,6 @@ execute_callback(F) ->
     try
         F()
     catch Class:Error ->
-        error_logger:error_msg("application=wsecli, issue=hook_failed, reason=~1000p:~1000p", 
+        error_logger:error_msg("application=wsecli, issue=hook_failed, reason=~1000p:~1000p",
                                [Class, Error])
     end.

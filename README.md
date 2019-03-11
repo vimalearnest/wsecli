@@ -27,7 +27,7 @@ Only the protocol specificied at [RFC6455](http://tools.ietf.org/html/rfc6455) (
 Add this repo as a dependency to your rebar.config file
 
 ```erlang
-{wsecli, ".*", {git, "https://github.com/esl/wsecli", {tag, master}}}
+{wsecli, ".*", {git, "https://github.com/grindr/wsecli", {tag, master}}}
 ```
 
 and then
@@ -45,13 +45,13 @@ I will demostrate its usage with the echo service at [www.websocket.org](http://
 
 
    ```erlang
-   1>wsecli:start("echo.websocket.org", 80, "/", []).
+   1>{ok, Socket} = wsecli:start("echo.websocket.org", 80, "/", []).
    ```
    
    or the function ```wsecli:start/2```
    
    ```erlang
-   2>wsecli:start("ws://echo.websocket.org/", []).
+   2>{ok, Socket} = wsecli:start("ws://echo.websocket.org/", []).
    ```
    
    The valid options for the client are:
@@ -62,13 +62,13 @@ I will demostrate its usage with the echo service at [www.websocket.org](http://
 2. Add a callback for received messages,
 
   	```erlang
-  	3>wsecli:on_message(fun(text, Message)-> io:format("Echoed message: ~s ~n", [Message]) end).
+  	3>wsecli:on_message(Socket, fun(text, Message)-> io:format("Echoed message: ~s ~n", [Message]) end).
   	```
 
 3. Send a message that will be echoed,
 
   	```erlang
-  	4> wsecli:send("Hello").
+  	4> wsecli:send(Socket, "Hello").
   	ok
   	Echoed message: Hello
   	```
@@ -76,7 +76,7 @@ I will demostrate its usage with the echo service at [www.websocket.org](http://
 4. And finally to stop it
 
   	```erlang
-  	5>wsecli:stop().
+  	5>wsecli:stop(Socket).
   	```
 
 
